@@ -6,7 +6,8 @@
         xmlns:local="clr-namespace:DownloadClientWithResume"
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800"
-        FontSize="20">
+        FontSize="14"
+        d:DataContext="{d:DesignInstance local:ViewModel}">
     <Grid Margin="5">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
@@ -24,10 +25,10 @@
         <Label Grid.Column="0" Grid.Row="0" Margin="5">Address</Label>
         <Button x:Name="DownloadButton" Grid.Column="2" Grid.Row="0" Command="{Binding DownloadCommand}" Margin="5" Padding="5">Download</Button>
         <Button x:Name="CancelButton" Grid.Column="3" Grid.Row="0" Command="{Binding CancelDownloadCommand}"  Padding="5" Margin="5">Cancel</Button>
-        <TextBox x:Name="AddressTextBox" Grid.Column="1" Grid.Row="0" Text="{Binding DownloadUrl}" Margin="5" MinWidth="100"></TextBox>
+        <TextBox x:Name="AddressTextBox" Grid.Column="1" Grid.Row="0" Text="{Binding DownloadUrl, UpdateSourceTrigger=PropertyChanged}" Margin="5" MinWidth="100"></TextBox>
         
         <Label  Grid.Column="0" Grid.Row="1" Margin="5">Download to:</Label>
-        <TextBox x:Name="DownoadTextBox" Grid.Column="1" Grid.ColumnSpan="2" Grid.Row="1" Text="{Binding DownloadFilePath}" Margin="5" MinWidth="100"></TextBox>
+        <TextBox x:Name="DownoadTextBox" Grid.Column="1" Grid.ColumnSpan="2" Grid.Row="1" Text="{Binding DownloadFilePath, UpdateSourceTrigger=PropertyChanged}" Margin="5" MinWidth="100"></TextBox>
         <Button x:Name="DeleteFileButton" Grid.Column="3" Grid.Row="1"  Command="{Binding DeleteFileCommand}" Padding="5" Margin="5">Delete</Button>
 
         <ProgressBar x:Name="DownloadProgress" Grid.Column="0" Grid.ColumnSpan="4" Grid.Row="2" MinHeight="25" Margin="5" Value="{Binding DownloadProgress}" Foreground="CornflowerBlue"/>
