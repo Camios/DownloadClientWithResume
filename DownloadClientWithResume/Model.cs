@@ -73,6 +73,8 @@ namespace DownloadClientWithResume
         {
             _isDownloading = true;
             
+            // TODO how to do resume with range or just with file size...
+
             _downloadCts = new CancellationTokenSource();
             HttpResponseMessage responseMessage = await _httpClient.GetAsync(DownloadUrl, HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token)
                 .ConfigureAwait(false);
