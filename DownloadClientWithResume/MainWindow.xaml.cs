@@ -16,7 +16,10 @@ namespace DownloadClientWithResume
             DataContext = new ViewModel();
         }
 
-
+        private void OutputTextBlock_TargetUpdated(object sender, System.Windows.Data.DataTransferEventArgs e)
+        {
+            OutputScroll.ScrollToBottom();
+        }
     }
 
 }
