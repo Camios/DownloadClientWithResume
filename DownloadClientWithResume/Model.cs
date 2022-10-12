@@ -87,18 +87,17 @@ namespace DownloadClientWithResume
                 const int maxTries = 10; // TODO max tries or max timeout?
                 int tries = 0;
                 long contentLength = -1;
-                long totalBytesProcessed = 0;
                 bool acceptsRanges = false;
                 FileInfo fi = new(DownloadFilePath);
-                bool appendToExistingFile = false; // TODO
-                bool useExistingFile = appendToExistingFile && fi.Exists;
-                using var fileStream = useExistingFile
+                bool useExistingFile = false; // TODO
+                bool appendToExistingFile = useExistingFile && fi.Exists;
+                using var fileStream = appendToExistingFile
                     ? new FileStream(DownloadFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)
                     : new FileStream(DownloadFilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
-                if (useExistingFile)
-                {
-                    totalBytesProcessed = fi.Length;
-                }
+                long totalBytesProcessed = useExistingFile
+                    ? totalBytesProcessed = fi.Length
+                    : 0;
+                
                 while (contentLength == -1 
                     || (acceptsRanges && totalBytesProcessed < contentLength))
                 {
@@ -106,13 +105,14 @@ namespace DownloadClientWithResume
                     {
                         HttpRequestMessage requestMessage = new(HttpMethod.Get, DownloadUrl);
 
-                        if (contentLength != -1)
+                        if (contentLength != -1 || appendToExistingFile)
                         {
                             requestMessage.Headers.Range = new(totalBytesProcessed, null);
-                            // TODO if only specifying 'from' above doesn't work, then try setting 'to': requestMessage.Headers.Range = new(totalBytesProcessed, contentLength - 1);
 
                             // Debugging
-                            DispatchToUiContext(() => LogText += $"Requesting range {totalBytesProcessed}-{contentLength-1}{Environment.NewLine}");
+                            DispatchToUiContext(() => LogText += $"Requesting range {totalBytesProcessed}-*{Environment.NewLine}");
+                            // TODO if only specifying 'from' above doesn't work, then try setting 'to': requestMessage.Headers.Range = new(totalBytesProcessed, contentLength - 1); Note: couldn't do with appendToExistingFile
+                            // TODO DispatchToUiContext(() => LogText += $"Requesting range {totalBytesProcessed}-{contentLength-1}{Environment.NewLine}");
                         }
 
                         HttpResponseMessage responseMessage = await _httpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token)
