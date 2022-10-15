@@ -17,6 +17,7 @@ namespace DownloadClientWithResume
         public ViewModel()
         {
             DownloadCommand = new AsyncRelayCommand(CommenceDownload, CanDownload);
+            DownloadGzCommand = new AsyncRelayCommand(CommenceDownloadGz, CanDownloadGz);
             CancelDownloadCommand = new RelayCommand(CancelDownload, CanCancelDownload);
             DeleteFileCommand = new RelayCommand(DeleteFile, CanDeleteFile);
         }
@@ -63,6 +64,7 @@ namespace DownloadClientWithResume
 
 
         public IAsyncRelayCommand DownloadCommand { get; }
+        public IAsyncRelayCommand DownloadGzCommand { get; }
 
         public IRelayCommand CancelDownloadCommand { get; }
         public IRelayCommand DeleteFileCommand { get; }
@@ -102,6 +104,39 @@ namespace DownloadClientWithResume
             DispatchToUiContext(() => DeleteFileCommand.NotifyCanExecuteChanged());
         }
 
+        private async Task CommenceDownloadGz()
+        {
+            _isDownloading = true;
+
+            // TODO how to do resume with range or just with file size...
+
+            _downloadCts = new CancellationTokenSource();
+            HttpResponseMessage responseMessage = await _httpClient.GetAsync(DownloadUrl, HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token)
+                .ConfigureAwait(false);
+            responseMessage.EnsureSuccessStatusCode();
+            var contentLength = responseMessage.Content.Headers.ContentLength ?? 0;
+
+            using var responseStream = await responseMessage.Content.ReadAsStreamAsync();
+            using var fileStream = File.Create(DownloadFilePath);
+            fileStream.Position = 0;
+
+            var byteBuffer = new byte[1024];
+            long totalBytesProcessed = 0;
+
+            while (totalBytesProcessed < contentLength
+                && !_downloadCts.IsCancellationRequested)
+            {
+                int bytesRead = await responseStream.ReadAsync(byteBuffer, 0, byteBuffer.Length)
+                    .ConfigureAwait(false);
+                await fileStream.WriteAsync(byteBuffer, 0, bytesRead);
+                totalBytesProcessed += bytesRead;
+                LogText += $"{totalBytesProcessed}{Environment.NewLine}";
+                DispatchToUiContext(() => DownloadProgress = totalBytesProcessed * 100.0 / contentLength);
+            }
+            _isDownloading = false;
+            DispatchToUiContext(() => DeleteFileCommand.NotifyCanExecuteChanged());
+        }
+
         private void DispatchToUiContext(Action action)
         {
             if (Application.Current.Dispatcher.CheckAccess())
@@ -126,6 +161,16 @@ namespace DownloadClientWithResume
                 && !string.IsNullOrWhiteSpace(DownloadFilePath)
                 && Directory.Exists(System.IO.Path.GetDirectoryName(DownloadFilePath));
         }
+
+        private bool CanDownloadGz()
+        {
+            Debug.WriteLine("CanDownloadGz");
+            return !_isDownloading
+                && !string.IsNullOrWhiteSpace(DownloadUrl)
+                && !string.IsNullOrWhiteSpace(DownloadFilePath)
+                && Directory.Exists(System.IO.Path.GetDirectoryName(DownloadFilePath));
+        }
+
 
         public string DownloadUrl
         {
