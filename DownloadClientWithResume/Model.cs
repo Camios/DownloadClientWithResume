@@ -11,6 +11,8 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICSharpCode.SharpZipLib.Core;
+using ICSharpCode.SharpZipLib.GZip;
 
 namespace DownloadClientWithResume
 {
@@ -214,34 +216,156 @@ namespace DownloadClientWithResume
 
         private async Task CommenceDownloadGz()
         {
-            _isDownloading = true;
-
-            // TODO how to do resume with range or just with file size...
-
-            _downloadCts = new CancellationTokenSource();
-            HttpResponseMessage responseMessage = await _httpClient.GetAsync(DownloadUrl, HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token)
-                .ConfigureAwait(false);
-            responseMessage.EnsureSuccessStatusCode();
-            var contentLength = responseMessage.Content.Headers.ContentLength ?? 0;
-
-            using var responseStream = await responseMessage.Content.ReadAsStreamAsync();
-            using var fileStream = File.Create(DownloadFilePath);
-            fileStream.Position = 0;
-
-            var byteBuffer = new byte[1024];
-            long totalBytesProcessed = 0;
-
-            while (totalBytesProcessed < contentLength
-                && !_downloadCts.IsCancellationRequested)
+            DispatchToUiContext(() => LogText += $"{Environment.NewLine}{Environment.NewLine}Commencing download{Environment.NewLine}");
+            try
             {
-                int bytesRead = await responseStream.ReadAsync(byteBuffer, 0, byteBuffer.Length)
-                    .ConfigureAwait(false);
-                await fileStream.WriteAsync(byteBuffer, 0, bytesRead);
-                totalBytesProcessed += bytesRead;
-                LogText += $"{totalBytesProcessed}{Environment.NewLine}";
-                DispatchToUiContext(() => DownloadProgress = totalBytesProcessed * 100.0 / contentLength);
+                // UI stuff
+                _isDownloading = true;
+                _downloadCts = new CancellationTokenSource();
+                CancelDownloadCommand.NotifyCanExecuteChanged();
+                DownloadCommand.NotifyCanExecuteChanged();
+                double lastProgress = 0;
+                double currentProgress = 0;
+
+                const int maxTries = 10; // TODO max tries or max timeout?
+                int tries = 0;
+                long contentLength = -1;
+                bool acceptsRanges = false;
+                FileInfo fi = new(DownloadFilePath);
+                bool useExistingFile = false; // TODO
+                bool appendToExistingFile = useExistingFile && fi.Exists;
+                using var fileStream = appendToExistingFile
+                    ? new FileStream(DownloadFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)
+                    : new FileStream(DownloadFilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+                long totalBytesProcessed = useExistingFile
+                    ? totalBytesProcessed = fi.Length
+                    : 0;
+
+                // http response stream is used, reading into GZipInputStream.
+                // The GZipInputStream reads the stream (header, then DEFLATE compress section and writes out the decompressed data
+                // What we might need is the ability to swap the GZipInputStream's baseInputStream
+                byte[] dataBuffer = new byte[4096];
+
+                GZipInputStream gzipStream = null;
+                    // Change this to your needs
+
+
+                while (contentLength == -1
+                    || (acceptsRanges && totalBytesProcessed < contentLength))
+                {
+                    try
+                    {
+                        HttpRequestMessage requestMessage = new(HttpMethod.Get, DownloadUrl);
+
+                        if (contentLength != -1 || appendToExistingFile)
+                        {
+                            requestMessage.Headers.Range = new(totalBytesProcessed, null);
+
+                            // Debugging
+                            DispatchToUiContext(() => LogText += $"Requesting range {totalBytesProcessed}-*{Environment.NewLine}");
+                            // TODO if only specifying 'from' above doesn't work, then try setting 'to': requestMessage.Headers.Range = new(totalBytesProcessed, contentLength - 1); Note: couldn't do with appendToExistingFile
+                            // TODO DispatchToUiContext(() => LogText += $"Requesting range {totalBytesProcessed}-{contentLength-1}{Environment.NewLine}");
+                        }
+
+                        HttpResponseMessage responseMessage = await _httpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token)
+                            .ConfigureAwait(false);
+                        responseMessage.EnsureSuccessStatusCode();
+
+                        if (contentLength == -1)
+                        {
+                            contentLength = responseMessage.Content.Headers.ContentLength ?? 0;
+                            acceptsRanges = responseMessage.Headers.AcceptRanges.Any(x => string.Equals(x, "bytes", StringComparison.OrdinalIgnoreCase));
+
+                            // Debugging
+                            DispatchToUiContext(() => LogText += $"Accept Ranges: {string.Join(". ", responseMessage.Headers.AcceptRanges)}.{Environment.NewLine}");
+                        }
+                        else
+                        {
+                            if (responseMessage.Content.Headers.ContentRange == null)
+                            {
+                                contentLength = -1;
+                                throw new IOException($"Server didn't send expected content range. Resetting content length for retry. Note: Server's Accepts Range: {string.Join(". ", responseMessage.Headers.AcceptRanges)}");
+                            }
+
+                            // Debugging
+                            var contentRange = responseMessage.Content.Headers.ContentRange;
+                            var chunkContentLength = responseMessage.Content.Headers.ContentLength ?? 0;
+                            DispatchToUiContext(() => LogText += $"Processing range {contentRange.From}-{contentRange.To}. Chunk Length: {chunkContentLength}. (Total Response Length: {contentLength}{Environment.NewLine}");
+                        }
+
+                        if (contentLength == 0)
+                            break; // TODO could warn about empty file...?
+
+                        // process the response stream
+                        using var responseStream = await responseMessage.Content.ReadAsStreamAsync();
+
+                        if (gzipStream == null) 
+                            gzipStream = new GZipInputStream(responseStream);
+                        else
+                            gzipStream.TheStream = responseStream;
+
+                        StreamUtils.Copy(gzipStream, fileStream, dataBuffer);
+
+                        //var byteBuffer = new byte[1024];
+                        //while (totalBytesProcessed < contentLength
+                        //    && !_downloadCts.IsCancellationRequested)
+                        //{
+                        //    int bytesRead = await responseStream.ReadAsync(byteBuffer, 0, byteBuffer.Length)
+                        //        .ConfigureAwait(false);
+
+                        //    if ((bytesRead == 0 && totalBytesProcessed < contentLength)
+                        //        || (bytesRead < byteBuffer.Length && (totalBytesProcessed + bytesRead) < contentLength))
+                        //    {
+                        //        throw new IOException($"Unexpected end of stream.");
+                        //    }
+                        //    else if (bytesRead + totalBytesProcessed > contentLength)
+                        //    {
+                        //        // TODO This should probably be a non-retry
+                        //        throw new IOException($"Too many byte received. Expected: {contentLength}. Received: {bytesRead + totalBytesProcessed} ");
+                        //    }
+
+                        //    await fileStream.WriteAsync(byteBuffer, 0, bytesRead);
+                        //    totalBytesProcessed += bytesRead;
+
+                        //    // UI/debugging to be abstracted
+                        //    currentProgress = totalBytesProcessed * 100.0 / contentLength;
+                        //    if (currentProgress > 0 && currentProgress - lastProgress > 0.5)
+                        //    {
+                        //        DispatchToUiContext(() => LogText += $"{totalBytesProcessed}{Environment.NewLine}");
+                        //        DispatchToUiContext(() => DownloadProgress = currentProgress);
+                        //        lastProgress = currentProgress;
+                        //    }
+                        //}
+                    }
+                    catch (IOException ex)
+                    {
+                        tries++;
+                        if (tries >= maxTries)
+                        {
+                            throw new IOException($"Unable to complete download. {totalBytesProcessed} of {contentLength} ({totalBytesProcessed * 100.0 / contentLength}");
+                        }
+                        DispatchToUiContext(() => LogText += $"Retrying. Number of attempts: {tries}. Caught IOException {totalBytesProcessed} of {contentLength} ({totalBytesProcessed * 100.0 / contentLength}%) {Environment.NewLine}");
+
+                    }
+                }
+                if (totalBytesProcessed < contentLength)
+                {
+                    DispatchToUiContext(() => LogText += $"Prematurely ended download. Only read {totalBytesProcessed} of {contentLength} total. Server AcceptsRanges: {acceptsRanges}. ");
+                }
+                else
+                {
+                    DispatchToUiContext(() => LogText += $"contentLength:{contentLength}, acceptsRanges: {acceptsRanges}, totalBytesProcessed: {totalBytesProcessed} ");
+                }
+
             }
-            _isDownloading = false;
+            catch (Exception ex)
+            {
+                DispatchToUiContext(() => LogText += ex.ToString());
+            }
+            finally
+            {
+                _isDownloading = false;
+            }
             DispatchToUiContext(() => DeleteFileCommand.NotifyCanExecuteChanged());
         }
 
@@ -278,7 +402,6 @@ namespace DownloadClientWithResume
                 && !string.IsNullOrWhiteSpace(DownloadFilePath)
                 && Directory.Exists(System.IO.Path.GetDirectoryName(DownloadFilePath));
         }
-
 
         public string DownloadUrl
         {
