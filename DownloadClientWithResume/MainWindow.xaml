@@ -33,8 +33,8 @@
 
         <ProgressBar x:Name="DownloadProgress" Grid.Column="0" Grid.ColumnSpan="4" Grid.Row="2" MinHeight="25" Margin="5" Value="{Binding DownloadProgress}" Foreground="CornflowerBlue"/>
         
-        <ScrollViewer  Grid.Column="0" Grid.ColumnSpan="4" Grid.Row="3" Margin="5" >
-            <TextBlock x:Name="OutputTextBlock" Text="{Binding LogText}" Background="AliceBlue" TextWrapping="Wrap"  />
+        <ScrollViewer x:Name="OutputScroll"  Grid.Column="0" Grid.ColumnSpan="4" Grid.Row="3" Margin="5" >
+            <TextBlock x:Name="OutputTextBlock" Text="{Binding LogText, NotifyOnTargetUpdated=True}" Background="AliceBlue" TextWrapping="Wrap" TargetUpdated="OutputTextBlock_TargetUpdated" />
         </ScrollViewer>     
     </Grid>
 
