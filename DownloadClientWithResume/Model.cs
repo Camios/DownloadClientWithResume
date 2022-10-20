@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICSharpCode.SharpZipLib;
 using ICSharpCode.SharpZipLib.Core;
 using ICSharpCode.SharpZipLib.GZip;
 
@@ -28,7 +29,7 @@ namespace DownloadClientWithResume
 
         private HttpClient _httpClient = new HttpClient();
         private bool _isDownloading;
-        private string _downloadUrl = "http://localhost:40808";//"http://speedcheck.cdn.on.net/10meg.test";
+        private string _downloadUrl = "http://localhost:40808/gz";//"http://speedcheck.cdn.on.net/10meg.test";
         private string _downloadFilePath = System.IO.Path.Combine(Environment.CurrentDirectory, "_tempfile.data");
         private string _logText = "";
         private double _downloadProgress = 0;
@@ -77,6 +78,11 @@ namespace DownloadClientWithResume
 
         private async Task CommenceDownload()
         {
+            if (DownloadUrl.EndsWith("gz"))
+            {
+                await CommenceDownloadGz();
+                return;
+            }    
             DispatchToUiContext(() => LogText += $"{Environment.NewLine}{Environment.NewLine}Commencing download{Environment.NewLine}");
             try
             {
@@ -246,7 +252,7 @@ namespace DownloadClientWithResume
                 // What we might need is the ability to swap the GZipInputStream's baseInputStream
                 byte[] dataBuffer = new byte[4096];
 
-                GZipInputStream gzipStream = null;
+                GZipInputStream gzipStream = null!;
                     // Change this to your needs
 
 
@@ -302,51 +308,39 @@ namespace DownloadClientWithResume
                         if (gzipStream == null) 
                             gzipStream = new GZipInputStream(responseStream);
                         else
-                            gzipStream.TheStream = responseStream;
+                            gzipStream.ChangeInputStream(responseStream);
 
+                        // TODO doesn't report progress
                         StreamUtils.Copy(gzipStream, fileStream, dataBuffer);
 
-                        //var byteBuffer = new byte[1024];
-                        //while (totalBytesProcessed < contentLength
-                        //    && !_downloadCts.IsCancellationRequested)
-                        //{
-                        //    int bytesRead = await responseStream.ReadAsync(byteBuffer, 0, byteBuffer.Length)
-                        //        .ConfigureAwait(false);
-
-                        //    if ((bytesRead == 0 && totalBytesProcessed < contentLength)
-                        //        || (bytesRead < byteBuffer.Length && (totalBytesProcessed + bytesRead) < contentLength))
-                        //    {
-                        //        throw new IOException($"Unexpected end of stream.");
-                        //    }
-                        //    else if (bytesRead + totalBytesProcessed > contentLength)
-                        //    {
-                        //        // TODO This should probably be a non-retry
-                        //        throw new IOException($"Too many byte received. Expected: {contentLength}. Received: {bytesRead + totalBytesProcessed} ");
-                        //    }
-
-                        //    await fileStream.WriteAsync(byteBuffer, 0, bytesRead);
-                        //    totalBytesProcessed += bytesRead;
-
-                        //    // UI/debugging to be abstracted
-                        //    currentProgress = totalBytesProcessed * 100.0 / contentLength;
-                        //    if (currentProgress > 0 && currentProgress - lastProgress > 0.5)
-                        //    {
-                        //        DispatchToUiContext(() => LogText += $"{totalBytesProcessed}{Environment.NewLine}");
-                        //        DispatchToUiContext(() => DownloadProgress = currentProgress);
-                        //        lastProgress = currentProgress;
-                        //    }
-                        //}
+                        totalBytesProcessed = gzipStream.BytesReadSoFar;
                     }
                     catch (IOException ex)
                     {
+                        if (gzipStream != null)
+                            totalBytesProcessed = gzipStream.BytesReadSoFar;
+
                         tries++;
                         if (tries >= maxTries)
                         {
                             throw new IOException($"Unable to complete download. {totalBytesProcessed} of {contentLength} ({totalBytesProcessed * 100.0 / contentLength}");
                         }
-                        DispatchToUiContext(() => LogText += $"Retrying. Number of attempts: {tries}. Caught IOException {totalBytesProcessed} of {contentLength} ({totalBytesProcessed * 100.0 / contentLength}%) {Environment.NewLine}");
-
+                        DispatchToUiContext(() => LogText += $"Retrying. Number of attempts: {tries}. Caught IOException {totalBytesProcessed} of {contentLength} ({totalBytesProcessed * 100.0 / contentLength}%).{Environment.NewLine}");
                     }
+                    // TODO pretty sure we don't need this any more now it is being abstracted
+                    //catch (SharpZipBaseException ex)
+                    //{
+                    //    if (gzipStream != null)
+                    //        totalBytesProcessed = gzipStream.BytesReadSoFar;
+
+                    //    tries++;
+                    //    if (tries >= maxTries)
+                    //    {
+                    //        throw new IOException($"Unable to complete download. {totalBytesProcessed} of {contentLength} ({totalBytesProcessed * 100.0 / contentLength}");
+                    //    }
+                    //    DispatchToUiContext(() => LogText += $"Retrying. Number of attempts: {tries}. Caught SharpZipBaseException {totalBytesProcessed} of {contentLength} ({totalBytesProcessed * 100.0 / contentLength}%).{Environment.NewLine}");
+
+                    //}
                 }
                 if (totalBytesProcessed < contentLength)
                 {
